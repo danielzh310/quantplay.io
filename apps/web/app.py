@@ -198,7 +198,7 @@ def render_nfl():
     with k2:
         fraction_of_kelly = st.selectbox("Kelly fraction", options=[0.25, 0.5, 1.0], index=0)
     with k3:
-        normalize_to_full_bankroll = st.checkbox("Normalize to use full bankroll", value=True)
+        normalize_to_full_bankroll = st.checkbox("Normalize to use full bankroll", value=False)
     with k4:
         cap_pct = st.number_input(
             "Max bet cap (% of bankroll)",
@@ -211,6 +211,9 @@ def render_nfl():
     cap_fraction_of_bankroll = None
     if cap_pct > 0:
         cap_fraction_of_bankroll = float(cap_pct) / 100.0
+
+    if normalize_to_full_bankroll:
+        st.warning("Using your full bankroll can undo fractional Kelly sizing and exceed your max bet cap.")
 
     st.caption(
         "Kelly uses model probability and sportsbook odds to size stakes. "
