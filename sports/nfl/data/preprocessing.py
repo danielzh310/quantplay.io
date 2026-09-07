@@ -12,6 +12,9 @@ def build_features(df):
 
     data = df.copy()
 
+    # Preseason week numbers overlap regular-season weeks. Sort by phase first.
+    data["phase_order"] = data.get("season_type", pd.Series("REG", index=data.index)).map({"PRE": 0, "REG": 1, "POST": 2})
+
     # Targets and helper columns
     data["home_win"] = (data["home_score"] > data["away_score"]).astype(int)
     data["margin"] = data["home_score"] - data["away_score"]
@@ -26,7 +29,7 @@ def build_features(df):
 
 
     home = data[
-        ["game_id", "season", "week", "home_team", "home_score", "away_score"]
+        ["game_id", "season", "phase_order", "week", "home_team", "home_score", "away_score"]
     ].copy()
 
     home.rename(
@@ -39,7 +42,7 @@ def build_features(df):
     )
 
     away = data[
-        ["game_id", "season", "week", "away_team", "away_score", "home_score"]
+        ["game_id", "season", "phase_order", "week", "away_team", "away_score", "home_score"]
     ].copy()
 
     away.rename(
@@ -53,47 +56,21 @@ def build_features(df):
 
     teams = (
         pd.concat([home, away])
-        .sort_values(["team", "season", "week"])
+        .sort_values(["team", "season", "phase_order", "week"])
         .reset_index(drop=True)
     )
 
-    teams["off_avg"] = (
-        teams.groupby("team")["pts_for"]
-        .shift(1)
-        .rolling(ROLLING_WINDOW)
-        .mean()
-        .reset_index(0, drop=True)
-        .fillna(0)
-    )
-
-    teams["def_avg"] = (
-        teams.groupby("team")["pts_against"]
-        .shift(1)
-        .rolling(ROLLING_WINDOW)
-        .mean()
-        .reset_index(0, drop=True)
-        .fillna(0)
-    )
-
-    # SEASON-TO-DATE AVERAGE (new)
-    # Expanding window within each season (all games so far this season)
-    teams["off_season_avg"] = (
-        teams.groupby(["team", "season"])["pts_for"]
-        .shift(1)  # Don't include current game
-        .expanding()
-        .mean()
-        .reset_index(drop=True)
-        .fillna(0)
-    )
-
-    teams["def_season_avg"] = (
-        teams.groupby(["team", "season"])["pts_against"]
-        .shift(1)
-        .expanding()
-        .mean()
-        .reset_index(drop=True)
-        .fillna(0)
-    )
+    # Compute windows within each group, using completed games only. Shift after
+    # carrying history forward so future fixtures never erase the latest averages.
+    for score, prefix in [("pts_for", "off"), ("pts_against", "def")]:
+        teams[f"{prefix}_avg"] = teams.groupby("team")[score].transform(
+            lambda values: values.dropna().rolling(ROLLING_WINDOW, min_periods=1)
+            .mean().reindex(values.index).ffill().shift(1)
+        ).fillna(0)
+        teams[f"{prefix}_season_avg"] = teams.groupby(["team", "season"])[score].transform(
+            lambda values: values.dropna().expanding().mean()
+            .reindex(values.index).ffill().shift(1)
+        ).fillna(0)
 
     home_feats = teams[
         ["game_id", "team", "off_avg", "def_avg", "off_season_avg", "def_season_avg"]

@@ -1,4 +1,5 @@
 import sys
+import math
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -51,6 +52,10 @@ def add_kelly_columns(
             probs.append(0.0)
             odds.append(100.0)
 
+        if not math.isfinite(odds[-1]) or odds[-1] == 0:
+            probs[-1] = 0.0
+            odds[-1] = 100.0
+
     stakes, meta = allocate_kelly(
         probs=probs,
         odds=odds,
@@ -69,21 +74,27 @@ def add_kelly_columns(
 
 
 def render_nfl():
+    phase_label = st.selectbox("Season phase", ["Regular season", "Preseason", "Playoffs"])
+    season_type = {"Preseason": "PRE", "Regular season": "REG", "Playoffs": "POST"}[phase_label]
+    preseason = season_type == "PRE"
     col1, col2 = st.columns([1, 1])
     with col1:
         seasons = list(range(2020, 2031))
         season = st.selectbox("Season", options=seasons, index=seasons.index(2026))
     with col2:
-        week_labels = (
-            ["Select week..."]
-            + [str(i) for i in range(1, 19)]
-            + ["Wildcard", "Divisional", "Conference Championship", "Super Bowl"]
-        )
-
-        selected_week_label = st.selectbox("Week", options=week_labels, index=0)
+        if preseason:
+            week_labels = ["Select week...", "Hall of Fame", "1", "2", "3"]
+            if season < 2021:
+                week_labels.append("4")
+        elif season_type == "POST":
+            week_labels = ["Select week...", "Wildcard", "Divisional", "Conference Championship", "Super Bowl"]
+        else:
+            week_labels = ["Select week..."] + [str(i) for i in range(1, 18 if season < 2021 else 19)]
+        selected_week_label = st.selectbox("Week", options=week_labels, index=0, key=f"nfl_week_{season_type}")
 
         label_to_week = {str(i): i for i in range(1, 19)}
         label_to_week.update({
+            "Hall of Fame": 0,
             "Wildcard": 19,
             "Divisional": 20,
             "Conference Championship": 21,
@@ -91,6 +102,10 @@ def render_nfl():
         })
 
         week = label_to_week.get(selected_week_label, None)
+
+    if preseason:
+        st.caption("Preseason includes the Hall of Fame game. Missing odds produce no bet; missing market lines produce PASS while model projections remain available.")
+    st.caption("Each run refreshes pregame odds before kickoff and uses closing odds once games start. Check results uses the odds saved with your picks.")
 
     st.divider()
 
@@ -214,13 +229,18 @@ def render_nfl():
         if week is None:
             st.warning("Please select a week before running predictions.")
         else:
-            with st.spinner("Running pipeline..."):
-                df = run_weekly(
-                    season=int(season),
-                    week=int(week),
-                    export=False,
-                    verbose=False,
-                )
+            try:
+                with st.spinner("Running pipeline..."):
+                    df = run_weekly(
+                        season=int(season),
+                        week=int(week),
+                        export=False,
+                        verbose=False,
+                        season_type=season_type,
+                    )
+            except Exception as exc:
+                st.error(f"Could not run predictions: {exc}")
+                return
 
             if df is None or len(df) == 0:
                 st.warning("No games found for that season/week.")
@@ -237,7 +257,7 @@ def render_nfl():
                 except Exception as e:
                     st.warning(f"Kelly sizing failed: {e}")
 
-                snapshot = save_prediction_snapshot(df, int(season), int(week))
+                snapshot = save_prediction_snapshot(df, int(season), int(week), season_type)
                 view_df = selected_view(df)
 
                 st.success(f"Generated and saved {len(df)} picks to {snapshot}.")
@@ -247,7 +267,7 @@ def render_nfl():
                 st.download_button(
                     "Download displayed CSV",
                     data=csv_bytes,
-                    file_name=f"nfl_weekly_picks_{int(season)}_wk{int(week)}.csv",
+                    file_name=f"nfl_{'preseason_' if preseason else ''}weekly_picks_{int(season)}_wk{int(week)}.csv",
                     mime="text/csv",
                 )
 
@@ -255,12 +275,16 @@ def render_nfl():
         if week is None:
             st.warning("Please select a week before checking results.")
         else:
-            snapshot = prediction_snapshot_path(int(season), int(week))
+            snapshot = prediction_snapshot_path(int(season), int(week), season_type)
             if not snapshot.exists():
                 st.warning(f"No saved predictions found yet for {int(season)} week {int(week)}.")
             else:
-                with st.spinner("Checking saved picks against completed games..."):
-                    graded, summary = grade_saved_predictions(int(season), int(week))
+                try:
+                    with st.spinner("Checking saved picks against completed games..."):
+                        graded, summary = grade_saved_predictions(int(season), int(week), season_type)
+                except Exception as exc:
+                    st.error(f"Could not check results: {exc}")
+                    return
 
                 if graded is None:
                     st.warning(summary["message"])

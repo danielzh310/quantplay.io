@@ -10,23 +10,25 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 OUTPUT_DIR = REPO_ROOT / "outputs"
 
 
-def prediction_snapshot_path(season: int, week: int) -> Path:
-    return OUTPUT_DIR / f"nfl_predictions_{int(season)}_wk{int(week)}.csv"
+def prediction_snapshot_path(season: int, week: int, season_type="REG") -> Path:
+    prefix = "nfl_preseason" if season_type == "PRE" else "nfl"
+    return OUTPUT_DIR / f"{prefix}_predictions_{int(season)}_wk{int(week)}.csv"
 
 
-def results_snapshot_path(season: int, week: int) -> Path:
-    return OUTPUT_DIR / f"nfl_results_{int(season)}_wk{int(week)}.csv"
+def results_snapshot_path(season: int, week: int, season_type="REG") -> Path:
+    prefix = "nfl_preseason" if season_type == "PRE" else "nfl"
+    return OUTPUT_DIR / f"{prefix}_results_{int(season)}_wk{int(week)}.csv"
 
 
-def save_prediction_snapshot(df: pd.DataFrame, season: int, week: int) -> Path:
+def save_prediction_snapshot(df: pd.DataFrame, season: int, week: int, season_type="REG") -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    path = prediction_snapshot_path(season, week)
+    path = prediction_snapshot_path(season, week, season_type)
     df.to_csv(path, index=False)
     return path
 
 
-def load_prediction_snapshot(season: int, week: int) -> pd.DataFrame:
-    path = prediction_snapshot_path(season, week)
+def load_prediction_snapshot(season: int, week: int, season_type="REG") -> pd.DataFrame:
+    path = prediction_snapshot_path(season, week, season_type)
     if not path.exists():
         raise FileNotFoundError(f"No saved prediction snapshot found at {path}")
     return pd.read_csv(path)
@@ -51,12 +53,14 @@ def _moneyline_net(row):
     return stake * payout_profit_per_dollar(row[odds_col])
 
 
-def grade_saved_predictions(season: int, week: int):
-    predictions = load_prediction_snapshot(season, week)
-    schedule = load_weekly_data(seasons=[int(season)])
+def grade_saved_predictions(season: int, week: int, season_type=None):
+    season_type = (season_type or ("POST" if week >= 19 else "REG")).upper()
+    predictions = load_prediction_snapshot(season, week, season_type)
+    schedule = load_weekly_data(seasons=[int(season)], include_preseason=season_type == "PRE")
     actuals = schedule[
         (schedule["season"] == int(season)) &
         (schedule["week"] == int(week)) &
+        (schedule["season_type"] == season_type) &
         schedule["home_score"].notna() &
         schedule["away_score"].notna()
     ].copy()
@@ -91,7 +95,7 @@ def grade_saved_predictions(season: int, week: int):
     }
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    results_path = results_snapshot_path(season, week)
+    results_path = results_snapshot_path(season, week, season_type)
     graded.to_csv(results_path, index=False)
     summary["results_path"] = str(results_path)
     summary["message"] = "Results graded."

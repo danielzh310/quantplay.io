@@ -1,3 +1,4 @@
+import math
 from xgboost import XGBClassifier
 from sklearn.linear_model import LogisticRegression
 import nflreadpy as nfl
@@ -40,7 +41,7 @@ def calculate_profit_weight(row):
     
     # Weight = 1 + profit (so bigger upsets get more weight)
     # A +300 underdog win gets weight of 4.0, favorite at -200 gets weight of 1.5
-    return 1.0 + profit
+    return 1.0 + profit if math.isfinite(profit) else 1.0
 
 class Moneyline:
     def __init__(self):

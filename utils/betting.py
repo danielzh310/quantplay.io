@@ -4,6 +4,8 @@ These helpers are sport-agnostic. Sport-specific feature engineering and model
 choices should stay under `sports/<sport>/`.
 """
 
+import math
+
 
 def american_to_implied_probability(american_odds: float) -> float:
     """Convert American odds to implied win probability."""
@@ -27,5 +29,11 @@ def payout_profit_per_dollar(american_odds: float) -> float:
 
 def has_positive_edge(model_probability: float, american_odds: float, threshold: float = 0.0) -> bool:
     """Return whether model probability beats market implied probability by threshold."""
+    try:
+        odds = float(american_odds)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(odds) or odds == 0:
+        return False
     implied_probability = american_to_implied_probability(american_odds)
     return float(model_probability) - implied_probability > threshold

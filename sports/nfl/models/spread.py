@@ -1,6 +1,6 @@
 from sklearn.linear_model import Lasso
 from sklearn.preprocessing import StandardScaler
-from sklearn.impute import SimpleImputer
+from sklearn.pipeline import make_pipeline
 
 import pandas as pd
 
@@ -17,6 +17,8 @@ class Spread:
         # tuned lasso on residual target (edge)
         self.model = Lasso(alpha=1.0, max_iter=10000)
         self.scaler = StandardScaler()
+        self.margin_model = make_pipeline(StandardScaler(), Lasso(alpha=1.0, max_iter=10000))
+        self.has_market_training = False
 
     def _build_model_matrix(self, df):
         X = df[FEATURES].copy()
@@ -47,31 +49,30 @@ class Spread:
 
     def train(self, df):
         X = self._build_model_matrix(df)
-        # residual target: predict edge directly
-        y = df["margin"] - df["spread_line"]
-        Xs = self.scaler.fit_transform(X)
-        self.model.fit(Xs, y)
+        # A direct margin fallback keeps projections available without market lines.
+        self.margin_model.fit(X.drop(columns="spread_line"), df["margin"])
+        available = df["spread_line"].notna()
+        self.has_market_training = bool(available.any())
+        if self.has_market_training:
+            Xs = self.scaler.fit_transform(X.loc[available])
+            self.model.fit(Xs, (df["margin"] - df["spread_line"])[available])
 
     def predict(self, df):
         X = self._build_model_matrix(df)
-        Xs = self.scaler.transform(X)
-        # model predicts edge; reconstruct margin
-        imputer = SimpleImputer(strategy="median")
-        Xs_clean = imputer.fit_transform(Xs)
-
-        pred_edge = self.model.predict(Xs_clean)
-
-        spread = df["spread_line"].values[: len(pred_edge)]
-        pred_margin = pred_edge + spread
-        edges = pred_edge
-
-        picks = (pd.Series(edges) > 0).map(
-            {True: "HOME", False: "AWAY"}
-        )
-
+        margin = pd.Series(self.margin_model.predict(X.drop(columns="spread_line")), index=df.index)
+        edges = pd.Series(float("nan"), index=df.index)
+        picks = pd.Series("PASS", index=df.index)
+        available = df["spread_line"].notna()
+        if self.has_market_training and available.any():
+            edges.loc[available] = self.model.predict(self.scaler.transform(X.loc[available]))
+            margin.loc[available] = edges[available] + df.loc[available, "spread_line"]
+        elif available.any():
+            edges.loc[available] = margin[available] - df.loc[available, "spread_line"]
+        picks.loc[edges > 0] = "HOME"
+        picks.loc[edges <= 0] = "AWAY"
         return pd.DataFrame({
-            "game_id": df["game_id"].values[: len(pred_edge)],
-            "predicted_margin": pred_margin,
-            "spread_edge": edges,
-            "spread_pick": picks,
+            "game_id": df["game_id"].values,
+            "predicted_margin": margin.values,
+            "spread_edge": edges.values,
+            "spread_pick": picks.values,
         })

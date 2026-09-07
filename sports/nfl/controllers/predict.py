@@ -2,6 +2,7 @@ from pathlib import Path
 
 from sports.nfl.data.loaders import load_weekly_data
 from sports.nfl.data.preprocessing import build_features
+from sports.nfl.data.odds import MARKET_COLUMNS, refresh_game_odds
 
 from sports.nfl.models.moneyline import Moneyline
 from sports.nfl.models.spread import Spread
@@ -19,31 +20,50 @@ def run_weekly(
     export=True,
     output_path=None,
     verbose=True,
+    season_type=None,
 ):
+    season_type = (season_type or ("POST" if week is not None and week >= 19 else "REG")).upper()
+    if season_type not in {"PRE", "REG", "POST"}:
+        raise ValueError("season_type must be PRE, REG, or POST")
     if verbose:
         print("Loading football data...")
     if seasons is None and season is not None:
-        seasons = list(range(2022, int(season) + 1))
-    df = load_weekly_data(seasons=seasons)
+        seasons = list(range(min(2022, int(season) - 1), int(season) + 1))
+    df = load_weekly_data(seasons=seasons, include_preseason=season_type == "PRE")
+
+    # Refresh the requested slate for every phase. Preseason history also needs
+    # archived markets, which the scoreboard feed does not supply.
+    target = df["season_type"] == season_type
+    if season is not None:
+        target &= df["season"] == season
+    if week is not None:
+        target &= df["week"] == week
+    refresh = target | (df["season_type"] == "PRE")
+    updated = refresh_game_odds(df.loc[refresh])
+    df.loc[refresh, MARKET_COLUMNS] = updated[MARKET_COLUMNS]
 
     if verbose:
         print("Building rolling features...")
     feats = build_features(df)
 
     if season is not None and week is not None:
+        phase = feats["season_type"].map({"PRE": 0, "REG": 1, "POST": 2})
+        target_phase = {"PRE": 0, "REG": 1, "POST": 2}[season_type]
         train_df = feats[
             (feats["season"] < season) |
-            ((feats["season"] == season) & (feats["week"] < week))
+            ((feats["season"] == season) & (
+                (phase < target_phase) | ((phase == target_phase) & (feats["week"] < week))
+            ))
         ].copy()
         train_df = train_df[train_df["home_score"].notna()].copy()
 
         predict_df = feats[
             (feats["season"] == season) &
-            (feats["week"] == week)
+            (feats["week"] == week) & (feats["season_type"] == season_type)
         ].copy()
     else:
         train_df = feats[feats["home_score"].notna()].copy()
-        predict_df = feats[feats["home_score"].isna()].copy()
+        predict_df = feats[feats["home_score"].isna() & (feats["season_type"] == season_type)].copy()
 
     if verbose:
         print(f"Training on {len(train_df)} completed games")
@@ -51,6 +71,10 @@ def run_weekly(
     if predict_df.empty:
         print("No games found for that season/week.")
         return None
+
+    train_df = train_df.dropna(subset=["home_score", "away_score"])
+    if train_df.empty or train_df["home_win"].nunique() < 2:
+        raise ValueError("Not enough completed historical games to train the models.")
 
     if verbose:
         print(f"Predicting {len(predict_df)} upcoming games")
@@ -138,7 +162,10 @@ def run_weekly(
     out_df = pretty[ordered_cols]
 
     if export:
-        path = Path(output_path) if output_path else DEFAULT_OUTPUT_PATH
+        path = Path(output_path) if output_path else (
+            REPO_ROOT / "outputs" / "nfl_preseason_weekly_picks.csv"
+            if season_type == "PRE" else DEFAULT_OUTPUT_PATH
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         out_df.to_csv(path, index=False)
 

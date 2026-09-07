@@ -75,10 +75,10 @@ class Total:
         book_lines = df["total_line"].values[: len(y)]
         train_mid = self.mid_model.predict(X)
 
-        residuals = train_mid - book_lines
-        self.residual_mean_ = float(residuals.mean())
-        std = float(residuals.std(ddof=0))
-        self.residual_std_ = max(std, EDGE_BUFFER)
+        residuals = pd.Series(train_mid - book_lines).dropna()
+        if not residuals.empty:
+            self.residual_mean_ = float(residuals.mean())
+            self.residual_std_ = max(float(residuals.std(ddof=0)), EDGE_BUFFER)
 
     def predict(self, df):
         X = self._build_model_matrix(df)
