@@ -1,8 +1,10 @@
 from pathlib import Path
+import pandas as pd
 
-from sports.nfl.data.loaders import load_weekly_data
+from sports.nfl.data.loaders import load_weekly_data, load_preseason_data
 from sports.nfl.data.preprocessing import build_features
 from sports.nfl.data.odds import MARKET_COLUMNS, refresh_game_odds
+from sports.nfl.data.matchups import add_matchup_stats
 
 from sports.nfl.models.moneyline import Moneyline
 from sports.nfl.models.spread import Spread
@@ -21,6 +23,7 @@ def run_weekly(
     output_path=None,
     verbose=True,
     season_type=None,
+    include_team_stats=False,
 ):
     season_type = (season_type or ("POST" if week is not None and week >= 19 else "REG")).upper()
     if season_type not in {"PRE", "REG", "POST"}:
@@ -160,6 +163,30 @@ def run_weekly(
     ]
 
     out_df = pretty[ordered_cols]
+
+    if include_team_stats:
+        stat_columns = [
+            f"{side}_{stat}" for side in ("home", "away")
+            for stat in ("off_avg", "def_avg", "off_season_avg", "def_season_avg")
+        ]
+        out_df = out_df.merge(
+            predict_df[["game_id", *stat_columns]].drop_duplicates("game_id"), on="game_id"
+        )
+        # Longer matchup history is display-only: never feed it into training
+        # or the five-game recent-form comparisons.
+        history_start = int(df["season"].min())
+        display_start = max(1999, int(predict_df["season"].min()) - 15)
+        older_seasons = list(range(display_start, history_start))
+        meeting_history = train_df
+        if older_seasons:
+            older = (
+                load_preseason_data(older_seasons) if season_type == "PRE"
+                else load_weekly_data(seasons=older_seasons)
+            )
+            older = older[older["season"] < history_start]
+            meeting_history = pd.concat([older, train_df], ignore_index=True)
+        meeting_history = meeting_history[meeting_history["season"] >= display_start]
+        out_df = add_matchup_stats(out_df, train_df, season_type, meeting_history=meeting_history)
 
     if export:
         path = Path(output_path) if output_path else (

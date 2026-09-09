@@ -58,3 +58,19 @@ Run the offline regression and UI checks with:
 ```powershell
 python -m unittest discover -s tests -v
 ```
+
+## Team comparisons
+
+New UI prediction snapshots include a separate display-only comparison from ESPN
+box scores: points, net passing yards, rushing yards, giveaways, and the opposing
+statistics for defense and takeaways. Each team uses its last five completed games
+before the selected week, carrying across seasons. Preseason comparisons use only
+preseason games; other phases use regular-season and playoff games.
+
+Radar axes show percentile ranks among teams with available data in the loaded
+history, with lower-is-better defensive and giveaway statistics reversed. These
+are descriptive comparisons, not win probabilities. Hover or open the averages
+for raw values, sample sizes, and ranking-pool size. Missing data is not zero-filled.
+Previous-meeting charts show up to five earlier head-to-head final scores. None of
+these new display statistics changes the model training features. Older snapshots
+need a new prediction run to contain these comparisons.

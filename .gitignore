@@ -2,6 +2,12 @@
 __pycache__/
 *.pyc
 
+# Local tests
+tests/
+test_*.py
+*_test.py
+.pytest_cache/
+
 # Generated outputs
 outputs/*.csv
 
