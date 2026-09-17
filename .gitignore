@@ -14,3 +14,6 @@ outputs/*.csv
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Editor noise
+.vscode/

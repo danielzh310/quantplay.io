@@ -44,8 +44,8 @@ def calculate_profit_weight(row):
     return 1.0 + profit if math.isfinite(profit) else 1.0
 
 class Moneyline:
-    def __init__(self):
-        
+    def __init__(self, use_profit_weighting=True):
+
         # self.model = XGBClassifier(
         #     n_estimators=100,
         #     eval_metric='logloss',
@@ -53,12 +53,16 @@ class Moneyline:
         #     learning_rate=0.03,
         #     random_state=42
         #     )
-        
+
         self.model = LogisticRegression(max_iter=2000)
+        self.use_profit_weighting = use_profit_weighting
 
     def train(self, df):
-        profit_weights = df.apply(calculate_profit_weight, axis=1).values
-        profit_weights = profit_weights / profit_weights.mean()  # Normalize to mean=1
+        if self.use_profit_weighting:
+            profit_weights = df.apply(calculate_profit_weight, axis=1).values
+            profit_weights = profit_weights / profit_weights.mean()  # Normalize to mean=1
+        else:
+            profit_weights = None
 
         self.model.fit(df[FEATURES], df["home_win"], sample_weight=profit_weights)
 
