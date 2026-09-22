@@ -3,6 +3,7 @@ import math
 import json
 import logging
 import platform
+import traceback
 from importlib.metadata import version as package_version
 from html import escape
 from datetime import datetime
@@ -497,6 +498,7 @@ def render_nfl():
         announce("A week or playoff round is required.")
     elif run:
         announce(f"Loading odds and generating predictions for {slate_label}. Please wait.")
+        prediction_stage = "Loading data and generating model predictions"
         try:
             with st.spinner("Loading odds and generating predictions..."):
                 df = run_weekly(season=int(season), week=int(week), export=False,
@@ -505,20 +507,30 @@ def render_nfl():
             if df is None or df.empty:
                 announce("No games found for this selection. Any previous results remain below.")
             else:
+                prediction_stage = "Sizing wagers"
                 df = add_kelly_columns(df, bankroll, fraction_of_kelly,
                                        normalize_to_full_bankroll=normalize_to_full_bankroll, betting_enabled=betting_enabled,
                                        selection_mode=selection_mode)
+                prediction_stage = "Saving predictions"
                 save_prediction_snapshot(df, int(season), int(week), season_type)
                 entries[selection] = {"predictions": df, "settings": settings,
                                       "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
                 announce(f"Saved {len(df)} predictions for {slate_label}. Predictions are below.")
         except Exception as exc:
+            dependencies = {name: package_version(name) for name in ("pandas", "numpy", "scikit-learn", "scipy")}
             logging.getLogger(__name__).exception(
-                "Prediction failed: season=%s phase=%s week=%s; Python=%s; dependencies=%s",
-                season, season_type, week, platform.python_version(),
-                {name: package_version(name) for name in ("pandas", "numpy", "scikit-learn", "scipy")},
+                "Prediction failed: stage=%s season=%s phase=%s week=%s; Python=%s; dependencies=%s",
+                prediction_stage, season, season_type, week, platform.python_version(), dependencies,
             )
             st.error(f"Could not generate and save predictions. Try again. Details: {exc}")
+            with st.expander("Technical error details"):
+                st.caption("Copy these details when reporting the error.")
+                st.code(
+                    f"Stage: {prediction_stage}\nSlate: {slate_label}\n"
+                    f"Python: {platform.python_version()}\nDependencies: {json.dumps(dependencies, sort_keys=True)}\n\n"
+                    + traceback.format_exc(),
+                    language="text",
+                )
             announce("Predictions could not be updated. Any previous results remain below.")
     elif load_saved:
         try:
