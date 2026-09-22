@@ -1,8 +1,10 @@
-streamlit
-pandas
-numpy
-scikit-learn
-polars
-nflreadpy
-xgboost
-plotly
+# Match the tested local prediction environment on hosted rebuilds.
+streamlit==1.52.2
+pandas==2.3.2
+numpy==2.2.6
+scikit-learn==1.7.1
+scipy==1.16.1
+polars==1.35.2
+nflreadpy==0.1.4
+xgboost==3.1.2
+plotly==7.0.0

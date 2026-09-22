@@ -1,6 +1,9 @@
 import sys
 import math
 import json
+import logging
+import platform
+from importlib.metadata import version as package_version
 from html import escape
 from datetime import datetime
 
@@ -510,6 +513,11 @@ def render_nfl():
                                       "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
                 announce(f"Saved {len(df)} predictions for {slate_label}. Predictions are below.")
         except Exception as exc:
+            logging.getLogger(__name__).exception(
+                "Prediction failed: season=%s phase=%s week=%s; Python=%s; dependencies=%s",
+                season, season_type, week, platform.python_version(),
+                {name: package_version(name) for name in ("pandas", "numpy", "scikit-learn", "scipy")},
+            )
             st.error(f"Could not generate and save predictions. Try again. Details: {exc}")
             announce("Predictions could not be updated. Any previous results remain below.")
     elif load_saved:

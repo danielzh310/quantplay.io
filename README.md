@@ -66,6 +66,12 @@ python -m pip install -r requirements.txt
 python -m streamlit run apps/web/app.py
 ```
 
+Use Python 3.13 to match the tested local runtime. `requirements.txt` pins the
+tested package versions so hosted rebuilds use the same prediction libraries.
+After deploying dependency changes, rebuild the hosted environment and restart
+the app; refreshing a browser does not reload Python modules or dependencies.
+Prediction failures include a traceback and dependency versions in server logs.
+
 Select NFL, season, phase, and week, then **Run predictions**. Preseason,
 regular season, and playoffs have separate week choices and saved files.
 Preseason week 0 is the Hall of Fame game. **Check results** grades saved
