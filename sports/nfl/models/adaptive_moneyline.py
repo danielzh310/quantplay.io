@@ -45,7 +45,8 @@ def _fit(data, columns, weighting):
     if weighting in ("legacy", "profit"):
         function = calculate_legacy_weight if weighting == "legacy" else calculate_profit_weight
         weights = data.apply(function, axis=1).to_numpy()
-        weights /= weights.mean()
+        # Pandas Copy-on-Write can expose a read-only NumPy view.
+        weights = weights / weights.mean()
     model.fit(data[columns], data.home_win.astype(int), logisticregression__sample_weight=weights)
     return model
 
