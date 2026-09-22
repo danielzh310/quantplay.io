@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from decimal import Decimal, ROUND_FLOOR
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 
@@ -102,10 +103,8 @@ def normalize_stakes_to_bankroll(
     only_scale_positive: bool = True,
 ) -> List[float]:
     """
-    Scale stakes so they sum to bankroll_to_deploy.
-
-    This is what you were doing when you said:
-      "Use quarter-Kelly but spread the full bankroll across the slate."
+    Reduce stakes only when their sum exceeds bankroll_to_deploy.
+    Kept under the original name for compatibility; never increases exposure.
 
     Notes:
     - If only_scale_positive=True, we scale only stakes > 0 and keep zeros at zero.
@@ -121,13 +120,13 @@ def normalize_stakes_to_bankroll(
         pos_sum = sum(s for s in stakes if s > 0)
         if pos_sum <= 0:
             return [0.0 for _ in stakes]
-        factor = bankroll_to_deploy / pos_sum
+        factor = min(1.0, bankroll_to_deploy / pos_sum)
         return [float(s * factor) if s > 0 else 0.0 for s in stakes]
 
     total = sum(stakes)
     if total <= 0:
         return [0.0 for _ in stakes]
-    factor = bankroll_to_deploy / total
+    factor = min(1.0, bankroll_to_deploy / total)
     return [float(s * factor) for s in stakes]
 
 
@@ -137,7 +136,7 @@ def allocate_kelly(
     bankroll: float,
     *,
     fraction_of_kelly: float = 0.25,
-    normalize_to_full_bankroll: bool = True,
+    normalize_to_full_bankroll: bool = False,
     cap_fraction_of_bankroll: Optional[float] = None,
     min_stake: float = 0.0,
 ) -> Tuple[List[float], List[KellyResult]]:
@@ -151,14 +150,14 @@ def allocate_kelly(
 
     Options:
       fraction_of_kelly: 0.25 = quarter Kelly
-      normalize_to_full_bankroll: if True, scale all positive stakes so they sum to bankroll
+      normalize_to_full_bankroll: legacy argument; upward normalization is disabled
       cap_fraction_of_bankroll: cap any single bet, e.g. 0.08
       min_stake: drop tiny bets to 0
 
     Returns:
       (stakes, results) where:
-        stakes = final stakes (after optional normalization)
-        results = per-bet KellyResult (pre-normalization metadata)
+        stakes = final stakes after the total bankroll limit and cent rounding
+        results = per-bet KellyResult matching the final stakes
     """
     if len(probs) != len(odds):
         raise ValueError("probs and odds must have the same length.")
@@ -180,11 +179,12 @@ def allocate_kelly(
         results.append(r)
         raw_stakes.append(r.stake)
 
-    if normalize_to_full_bankroll:
-        final_stakes = normalize_stakes_to_bankroll(raw_stakes, bankroll, only_scale_positive=True)
-    else:
-        final_stakes = raw_stakes
-
+    final_stakes = normalize_stakes_to_bankroll(raw_stakes, bankroll, only_scale_positive=True)
+    final_stakes = [float(Decimal(str(s)).quantize(Decimal("0.01"), rounding=ROUND_FLOOR)) for s in final_stakes]
+    final_stakes = [s if s >= min_stake else 0.0 for s in final_stakes]
+    results = [replace(r, stake=s, is_no_bet=s <= 0,
+                       reason=(r.reason + "; bankroll limit/rounding" if s != r.stake else r.reason))
+               for r, s in zip(results, final_stakes)]
     return final_stakes, results
 
 def profit_if_win(stake: float, american_odds: float) -> float:

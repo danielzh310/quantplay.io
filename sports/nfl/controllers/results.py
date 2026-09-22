@@ -1,4 +1,6 @@
 from pathlib import Path
+from datetime import datetime, timezone
+from uuid import uuid4
 
 import pandas as pd
 
@@ -23,6 +25,15 @@ def results_snapshot_path(season: int, week: int, season_type="REG") -> Path:
 def save_prediction_snapshot(df: pd.DataFrame, season: int, week: int, season_type="REG") -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     path = prediction_snapshot_path(season, week, season_type)
+    # Preserve the previous snapshot and every new run before updating the
+    # familiar latest-file path. Settings and original odds travel in the CSV.
+    archive = OUTPUT_DIR / "prediction_history"
+    archive.mkdir(exist_ok=True)
+    (archive / ".gitignore").write_text("*\n", encoding="utf-8")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f") + "_" + uuid4().hex[:8]
+    if path.exists():
+        (archive / f"{path.stem}_{stamp}_previous.csv").write_bytes(path.read_bytes())
+    df.to_csv(archive / f"{path.stem}_{stamp}.csv", index=False)
     df.to_csv(path, index=False)
     return path
 
@@ -44,12 +55,15 @@ def _moneyline_result(row):
 
 def _moneyline_net(row):
     stake = float(row.get("kelly_stake_ml", 0.0) or 0.0)
-    if stake <= 0 or row["ml_result"] == "PUSH":
+    side = row.get("bet_side", row["ml_pick"])
+    if pd.isna(side):
+        side = row["ml_pick"]
+    if stake <= 0 or side == "PASS" or row["ml_result"] == "PUSH":
         return 0.0
-    if row["ml_pick"] != row["ml_result"]:
+    if side != row["ml_result"]:
         return -stake
 
-    odds_col = "home_moneyline" if row["ml_pick"] == "HOME" else "away_moneyline"
+    odds_col = "home_moneyline" if side == "HOME" else "away_moneyline"
     return stake * payout_profit_per_dollar(row[odds_col])
 
 
@@ -85,6 +99,9 @@ def grade_saved_predictions(season: int, week: int, season_type=None):
     graded["ml_result"] = graded.apply(_moneyline_result, axis=1)
 
     graded["ml_hit"] = graded["ml_pick"] == graded["ml_result"]
+    bet_side = graded["bet_side"].fillna(graded["ml_pick"]) if "bet_side" in graded else graded["ml_pick"]
+    funded = graded.get("kelly_stake_ml", pd.Series(0.0, index=graded.index)).gt(0) & bet_side.isin(["HOME", "AWAY"])
+    graded["bet_hit"] = (bet_side == graded["ml_result"]).where(funded)
     graded["ml_net"] = graded.apply(_moneyline_net, axis=1).round(2)
 
     summary = {
@@ -92,6 +109,9 @@ def grade_saved_predictions(season: int, week: int, season_type=None):
         "ml_hits": int(graded["ml_hit"].sum()),
         "ml_accuracy": float(graded["ml_hit"].mean()),
         "ml_net": float(graded["ml_net"].sum().round(2)),
+        "bets_placed": int(funded.sum()),
+        "bets_won": int(graded["bet_hit"].fillna(False).sum()),
+        "total_staked": float(graded.loc[funded, "kelly_stake_ml"].sum()) if "kelly_stake_ml" in graded else 0.0,
     }
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

@@ -23,6 +23,7 @@ FEATURES = [
 ]
 
 EDGE_THRESHOLD = 0.01
+WEIGHTING_MODES = ("none", "profit", "legacy")
 
 # Weight samples by potential profit (bigger upsets = higher weight)
 def calculate_profit_weight(row):
@@ -43,8 +44,21 @@ def calculate_profit_weight(row):
     # A +300 underdog win gets weight of 4.0, favorite at -200 gets weight of 1.5
     return 1.0 + profit if math.isfinite(profit) else 1.0
 
+
+def calculate_legacy_weight(row):
+    """Historical formula: one plus the actual winner's implied probability."""
+    odds = row.get("home_moneyline" if row["home_win"] == 1 else "away_moneyline")
+    try:
+        odds = float(odds)
+        if not math.isfinite(odds) or abs(odds) < 100:
+            return 1.0
+        return 1.0 + american_to_implied_probability(odds)
+    except (TypeError, ValueError):
+        return 1.0
+
+
 class Moneyline:
-    def __init__(self, use_profit_weighting=True):
+    def __init__(self, use_profit_weighting=True, *, weighting=None):
 
         # self.model = XGBClassifier(
         #     n_estimators=100,
@@ -55,11 +69,17 @@ class Moneyline:
         #     )
 
         self.model = LogisticRegression(max_iter=2000)
-        self.use_profit_weighting = use_profit_weighting
+        # Preserve existing callers (including the backtester); the main app
+        # explicitly selects its new unweighted default through run_weekly.
+        self.weighting = weighting if weighting is not None else ("profit" if use_profit_weighting else "none")
+        if self.weighting not in WEIGHTING_MODES:
+            raise ValueError(f"Unknown moneyline weighting: {self.weighting}")
+        self.use_profit_weighting = self.weighting == "profit"
 
     def train(self, df):
-        if self.use_profit_weighting:
-            profit_weights = df.apply(calculate_profit_weight, axis=1).values
+        if self.weighting != "none":
+            weight_function = calculate_profit_weight if self.weighting == "profit" else calculate_legacy_weight
+            profit_weights = df.apply(weight_function, axis=1).values
             profit_weights = profit_weights / profit_weights.mean()  # Normalize to mean=1
         else:
             profit_weights = None

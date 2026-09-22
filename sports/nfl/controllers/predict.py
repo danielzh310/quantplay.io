@@ -6,7 +6,9 @@ from sports.nfl.data.preprocessing import build_features
 from sports.nfl.data.odds import MARKET_COLUMNS, refresh_game_odds
 from sports.nfl.data.matchups import add_matchup_stats
 
-from sports.nfl.models.moneyline import Moneyline
+from sports.nfl.models.moneyline import Moneyline, WEIGHTING_MODES
+from sports.nfl.models.adaptive_moneyline import AdaptiveMoneyline
+from sports.nfl.data.moneyline_features import build_moneyline_features
 from sports.nfl.models.spread import Spread
 from sports.nfl.models.total import Total
 
@@ -24,14 +26,23 @@ def run_weekly(
     verbose=True,
     season_type=None,
     include_team_stats=False,
+    moneyline_weighting="auto",
+    moneyline_method="adaptive",
 ):
+    if moneyline_method not in ("adaptive", "classic"):
+        raise ValueError("Unknown moneyline method")
+    if moneyline_weighting not in (*WEIGHTING_MODES, "auto"):
+        raise ValueError(f"Unknown moneyline weighting: {moneyline_weighting}")
+    if moneyline_method == "classic" and moneyline_weighting == "auto":
+        moneyline_weighting = "legacy"
     season_type = (season_type or ("POST" if week is not None and week >= 19 else "REG")).upper()
     if season_type not in {"PRE", "REG", "POST"}:
         raise ValueError("season_type must be PRE, REG, or POST")
     if verbose:
         print("Loading football data...")
     if seasons is None and season is not None:
-        seasons = list(range(min(2022, int(season) - 1), int(season) + 1))
+        history_start = 2020 if season_type == "PRE" else 2016
+        seasons = list(range(min(history_start, int(season) - 4), int(season) + 1))
     df = load_weekly_data(seasons=seasons, include_preseason=season_type == "PRE")
 
     # Refresh the requested slate for every phase. Preseason history also needs
@@ -48,6 +59,8 @@ def run_weekly(
     if verbose:
         print("Building rolling features...")
     feats = build_features(df)
+    if moneyline_method == "adaptive":
+        feats = build_moneyline_features(feats)
 
     if season is not None and week is not None:
         phase = feats["season_type"].map({"PRE": 0, "REG": 1, "POST": 2})
@@ -76,19 +89,24 @@ def run_weekly(
         return None
 
     train_df = train_df.dropna(subset=["home_score", "away_score"])
+    ml_train = train_df
+    if moneyline_method == "adaptive":
+        # Never mix exhibition outcomes with regular/postseason calibration.
+        ml_train = train_df[train_df.season_type.eq("PRE") if season_type == "PRE" else train_df.season_type.ne("PRE")]
     if train_df.empty or train_df["home_win"].nunique() < 2:
         raise ValueError("Not enough completed historical games to train the models.")
 
     if verbose:
         print(f"Predicting {len(predict_df)} upcoming games")
 
-    ml = Moneyline()
+    ml = (AdaptiveMoneyline(weighting=moneyline_weighting) if moneyline_method == "adaptive"
+          else Moneyline(weighting=moneyline_weighting))
     sp = Spread()
     tot = Total()
 
     if verbose:
         print("Training models...")
-    ml.train(train_df)
+    ml.train(ml_train)
     sp.train(train_df)
     tot.train(train_df)
 
@@ -121,8 +139,6 @@ def run_weekly(
     })
 
     round_cols = [
-        "ml_home_prob",
-        "ml_away_prob",
         "model_spread_margin",
         "spread_edge",
         "projected_total",
@@ -162,7 +178,14 @@ def run_weekly(
         "total_buffer",
     ]
 
-    out_df = pretty[ordered_cols]
+    out_df = pretty[ordered_cols].copy()
+    for column in ("ml_home_prob_low", "ml_away_prob_low", "ml_reliability_n", "ml_raw_home_prob", "ml_model_version", "ml_model_details"):
+        if column in pretty:
+            out_df[column] = pretty[column]
+    for column in pretty.columns:
+        if column.startswith("ml_") and column not in out_df:
+            out_df[column] = pretty[column]
+    out_df["moneyline_weighting"] = ml.weighting if moneyline_method == "adaptive" else moneyline_weighting
 
     if include_team_stats:
         stat_columns = [

@@ -12,6 +12,7 @@ SCHEDULE_COLUMNS = [
     "espn_event_id", "kickoff", "game_started",
 ]
 TEAM_ALIASES = {"LAR": "LA", "WSH": "WAS"}
+CONTEXT_COLUMNS = ["home_rest", "away_rest", "home_qb_id", "away_qb_id", "location"]
 
 
 def _number(value):
@@ -65,8 +66,11 @@ def load_preseason_data(seasons):
     for season in seasons:
         url = (
             "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
-            f"?dates={season}0701-{season}0930&limit=1000"
+            f"?dates={season}&seasontype=1&limit=1000"
         )
+        # Historical date-range requests can return HTTP 400. Annual requests
+        # work, but ESPN may include other phases and the prior season's January
+        # games even with seasontype=1. _preseason_rows filters both phase/year.
         try:
             with urlopen(url, timeout=30) as response:
                 payload = json.load(response)
@@ -97,7 +101,7 @@ def load_weekly_data(seasons=None, include_preseason=False):
     )
     playoff_week = schedules["game_type"].map({"WC": 19, "DIV": 20, "CON": 21, "SB": 22})
     schedules["week"] = playoff_week.fillna(schedules["week"]).astype(int)
-    schedules = schedules[SCHEDULE_COLUMNS]
+    schedules = schedules[SCHEDULE_COLUMNS + [c for c in CONTEXT_COLUMNS if c in schedules]]
     if include_preseason:
         schedules = pd.concat([schedules, load_preseason_data(seasons)], ignore_index=True)
     schedules["gameday"] = pd.to_datetime(schedules["gameday"], utc=True, format="mixed")
