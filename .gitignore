@@ -9,7 +9,7 @@ test_*.py
 .pytest_cache/
 
 # Generated outputs
-outputs/*.csv
+outputs/
 
 # OS noise
 .DS_Store

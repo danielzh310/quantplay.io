@@ -14,6 +14,7 @@ from sklearn.metrics import brier_score_loss, log_loss
 from sports.nfl.data.loaders import load_weekly_data
 from sports.nfl.data.preprocessing import build_features
 from sports.nfl.data.moneyline_features import build_moneyline_features
+from sports.nfl.data.efficiency import add_efficiency_features
 from sports.nfl.models.moneyline import Moneyline
 from sports.nfl.models.adaptive_moneyline import AdaptiveMoneyline
 from utils.allocation import SizingSettings, allocate_predictions
@@ -125,6 +126,7 @@ def main():
         cache.parent.mkdir(parents=True, exist_ok=True)
         (cache.parent / ".gitignore").write_text("*\n")
         features.to_pickle(cache)
+    features = add_efficiency_features(features)
     report = validate(features, seasons, args.output_dir)
     print(report.to_string(index=False))
 

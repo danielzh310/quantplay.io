@@ -9,6 +9,7 @@ from sports.nfl.data.matchups import add_matchup_stats
 from sports.nfl.models.moneyline import Moneyline, WEIGHTING_MODES
 from sports.nfl.models.adaptive_moneyline import AdaptiveMoneyline
 from sports.nfl.data.moneyline_features import build_moneyline_features
+from sports.nfl.data.efficiency import add_efficiency_features
 from sports.nfl.models.spread import Spread
 from sports.nfl.models.total import Total
 
@@ -61,6 +62,8 @@ def run_weekly(
     feats = build_features(df)
     if moneyline_method == "adaptive":
         feats = build_moneyline_features(feats)
+        if season_type != "PRE":
+            feats = add_efficiency_features(feats, season=season, week=week, season_type=season_type)
 
     if season is not None and week is not None:
         phase = feats["season_type"].map({"PRE": 0, "REG": 1, "POST": 2})

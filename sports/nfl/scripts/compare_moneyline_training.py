@@ -13,6 +13,7 @@ from sklearn.metrics import brier_score_loss, log_loss
 
 from sports.nfl.models.adaptive_moneyline import AdaptiveMoneyline
 from sports.nfl.models.calibration import reliability_report
+from sports.nfl.data.efficiency import add_efficiency_features
 from sports.nfl.scripts.validate_moneyline import settle
 
 ARMS = {
@@ -73,6 +74,7 @@ def main():
     parser.add_argument("--output-dir", default="outputs/model_validation/equal-calibration-v1/evaluation")
     args = parser.parse_args()
     features = pd.read_pickle(args.feature_cache)
+    features = add_efficiency_features(features)
     print(compare(features, [int(s) for s in args.seasons.split(",")], args.output_dir).to_string(index=False))
 
 
